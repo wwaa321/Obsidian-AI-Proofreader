@@ -31,21 +31,321 @@ var import_obsidian5 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
+
+// src/types.ts
+var CATEGORY_LABELS = {
+  typo: "\u9519\u522B\u5B57",
+  punctuation: "\u6807\u70B9",
+  grammar: "\u8BED\u6CD5"
+};
+var MODE_LABELS = {
+  quick: "\u5FEB\u901F\u6A21\u5F0F",
+  standard: "\u6807\u51C6\u6A21\u5F0F",
+  deep: "\u6DF1\u5EA6\u6A21\u5F0F"
+};
+var MODE_DESCRIPTIONS = {
+  quick: "\u4EC5\u68C0\u6D4B\u9519\u522B\u5B57\uFF08\u97F3\u8FD1\u5B57\u3001\u5F62\u8FD1\u5B57\u3001\u7B14\u8BEF\uFF09",
+  standard: "\u68C0\u6D4B\u9519\u522B\u5B57 + \u6807\u70B9\u7B26\u53F7 + \u8BED\u6CD5\u9519\u8BEF",
+  deep: "\u5168\u90E8\u68C0\u6D4B + \u8868\u8FBE\u4F18\u5316\u5EFA\u8BAE"
+};
+var LICENSE_LABELS = {
+  basic: "\u57FA\u7840\u7248",
+  full: "\u6B63\u5F0F\u7248"
+};
+var LICENSE_DESCRIPTIONS = {
+  basic: "\u5FEB\u901F\u6A21\u5F0F\u68C0\u6D4B\uFF0C\u9002\u5408\u65E5\u5E38\u7B80\u5355\u6821\u5BF9",
+  full: "\u5168\u90E8\u68C0\u6D4B\u6A21\u5F0F\uFF0C\u5305\u542B\u6807\u70B9\u3001\u8BED\u6CD5\u3001\u8868\u8FBE\u4F18\u5316"
+};
+var DEFAULT_SETTINGS = {
+  apiKey: "",
+  apiEndpoint: "https://api.deepseek.com/v1/chat/completions",
+  modelName: "deepseek-chat",
+  ignoredWords: [],
+  maxSegmentLength: 1500,
+  timeout: 3e4,
+  detectionMode: "quick",
+  licenseType: "basic",
+  activationCode: "",
+  activatedAt: ""
+};
+
+// src/services/ActivationService.ts
+var LOCAL_STORAGE_KEY = "csc_license";
+var API_ENDPOINT = "https://kbfwajzlaswbqesgxedu.supabase.co/rest/v1/activation_codes_proofreader";
+var API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiZndhanpsYXN3YnFlc2d4ZWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDcwMjU5MjYsImV4cCI6MjA2MjYwMTkyNn0.RyoKxCOwAzGnwD2B1mjm2s9IOb1btKcrN94jf2RtPbQ";
+var ActivationService = class {
+  static isFullVersion(licenseType) {
+    return licenseType === "full";
+  }
+  static isBasicVersion(licenseType) {
+    return licenseType === "basic";
+  }
+  checkLocalLicenseStatus() {
+    try {
+      const storedLicense = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (storedLicense) {
+        const licenseInfo = JSON.parse(storedLicense);
+        if (licenseInfo.licenseType) {
+          return licenseInfo.licenseType;
+        }
+      }
+    } catch (error) {
+    }
+    return "basic";
+  }
+  getLocalLicenseInfo() {
+    try {
+      const storedLicense = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (storedLicense) {
+        return JSON.parse(storedLicense);
+      }
+    } catch (error) {
+    }
+    return null;
+  }
+  saveLicenseToLocalStorage(licenseInfo) {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(licenseInfo));
+    } catch (error) {
+    }
+  }
+  clearLicenseFromLocalStorage() {
+    try {
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
+    } catch (error) {
+    }
+  }
+  async activate(activationCode) {
+    if (!activationCode || activationCode.trim().length === 0) {
+      return {
+        success: false,
+        message: "\u8BF7\u8F93\u5165\u6FC0\u6D3B\u7801"
+      };
+    }
+    const trimmedCode = activationCode.trim();
+    try {
+      const url = `${API_ENDPOINT}?code=eq.${encodeURIComponent(trimmedCode)}&select=*`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "apikey": API_KEY,
+          "Authorization": `Bearer ${API_KEY}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        return {
+          success: false,
+          message: `\u670D\u52A1\u5668\u9519\u8BEF: HTTP ${response.status}`
+        };
+      }
+      const data = await response.json();
+      if (!data || data.length === 0) {
+        return {
+          success: false,
+          message: "\u6FC0\u6D3B\u7801\u65E0\u6548\uFF0C\u8BF7\u68C0\u67E5\u540E\u91CD\u8BD5"
+        };
+      }
+      const codeRecord = data[0];
+      if (codeRecord.status === "used") {
+        return {
+          success: false,
+          message: "\u8BE5\u6FC0\u6D3B\u7801\u5DF2\u88AB\u4F7F\u7528"
+        };
+      }
+      const updateUrl = `${API_ENDPOINT}?code=eq.${encodeURIComponent(trimmedCode)}`;
+      const updateResponse = await fetch(updateUrl, {
+        method: "PATCH",
+        headers: {
+          "apikey": API_KEY,
+          "Authorization": `Bearer ${API_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
+        body: JSON.stringify({
+          status: "used",
+          used_at: (/* @__PURE__ */ new Date()).toISOString()
+        })
+      });
+      if (!updateResponse.ok) {
+        return {
+          success: false,
+          message: "\u6FC0\u6D3B\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"
+        };
+      }
+      const licenseInfo = {
+        licenseType: "full",
+        activationCode: trimmedCode,
+        activatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      this.saveLicenseToLocalStorage(licenseInfo);
+      return {
+        success: true,
+        message: "\u6FC0\u6D3B\u6210\u529F\uFF01\u5DF2\u5347\u7EA7\u4E3A\u6B63\u5F0F\u7248",
+        licenseType: "full"
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes("fetch")) {
+          return {
+            success: false,
+            message: "\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u91CD\u8BD5"
+          };
+        }
+        return {
+          success: false,
+          message: `\u6FC0\u6D3B\u5931\u8D25: ${error.message}`
+        };
+      }
+      return {
+        success: false,
+        message: "\u6FC0\u6D3B\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5"
+      };
+    }
+  }
+  deactivate() {
+    this.clearLicenseFromLocalStorage();
+  }
+  isValidActivationCode(code) {
+    if (!code || typeof code !== "string") {
+      return false;
+    }
+    const trimmed = code.trim();
+    return trimmed.length >= 8 && trimmed.length <= 64;
+  }
+};
+var activationService = new ActivationService();
+
+// src/settings.ts
 var CSCSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.testButton = null;
     this.testStatus = null;
+    this.activationStatus = null;
+    this.activationButton = null;
+    this.modeDropdown = null;
     this.plugin = plugin;
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "\u4E2D\u6587\u9519\u522B\u5B57\u68C0\u6D4B\u8BBE\u7F6E" });
+    containerEl.createEl("h2", { text: "\u4E2D\u6587\u6821\u5BF9\u8BBE\u7F6E" });
+    this.renderLicenseSection(containerEl);
     this.renderApiSettings(containerEl);
     this.renderEngineSettings(containerEl);
     this.renderIgnoredWordsSettings(containerEl);
     this.renderAdvancedSettings(containerEl);
+  }
+  renderLicenseSection(containerEl) {
+    containerEl.createEl("h3", { text: "\u8BB8\u53EF\u8BC1" });
+    const licenseType = this.plugin.settings.licenseType;
+    const isFullVersion = ActivationService.isFullVersion(licenseType);
+    const statusContainer = containerEl.createDiv({ cls: "csc-license-status-container" });
+    this.activationStatus = statusContainer.createDiv({ cls: "csc-license-status" });
+    this.renderLicenseStatus(this.activationStatus, licenseType);
+    if (isFullVersion) {
+      const licenseInfo = activationService.getLocalLicenseInfo();
+      if (licenseInfo == null ? void 0 : licenseInfo.activatedAt) {
+        const activatedDate = new Date(licenseInfo.activatedAt).toLocaleDateString("zh-CN");
+        new import_obsidian.Setting(containerEl).setName("\u6FC0\u6D3B\u65F6\u95F4").setDesc(activatedDate);
+      }
+    } else {
+      new import_obsidian.Setting(containerEl).setName("\u6FC0\u6D3B\u7801").setDesc("\u8F93\u5165\u6FC0\u6D3B\u7801\u5347\u7EA7\u4E3A\u6B63\u5F0F\u7248\uFF0C\u89E3\u9501\u5168\u90E8\u68C0\u6D4B\u6A21\u5F0F").addText(
+        (text) => text.setPlaceholder("\u8BF7\u8F93\u5165\u6FC0\u6D3B\u7801").setValue(this.plugin.settings.activationCode).onChange(async (value) => {
+          this.plugin.settings.activationCode = value;
+          await this.plugin.saveSettings();
+        })
+      ).addButton((btn) => {
+        btn.setButtonText("\u6FC0\u6D3B");
+        btn.setClass("csc-activate-btn");
+        btn.onClick(async () => {
+          await this.handleActivation();
+        });
+        this.activationButton = btn.buttonEl;
+      });
+      const featureComparison = containerEl.createDiv({ cls: "csc-feature-comparison" });
+      this.renderFeatureComparison(featureComparison);
+    }
+  }
+  renderLicenseStatus(container, licenseType) {
+    container.empty();
+    const isFullVersion = ActivationService.isFullVersion(licenseType);
+    const statusClass = isFullVersion ? "csc-license-full" : "csc-license-basic";
+    const statusText = isFullVersion ? "\u2713 \u6B63\u5F0F\u7248" : "\u57FA\u7840\u7248";
+    container.createEl("span", {
+      cls: `csc-license-badge ${statusClass}`,
+      text: statusText
+    });
+    container.createEl("span", {
+      cls: "csc-license-desc",
+      text: LICENSE_DESCRIPTIONS[licenseType]
+    });
+  }
+  renderFeatureComparison(container) {
+    container.createEl("div", { cls: "csc-feature-comparison-title", text: "\u7248\u672C\u529F\u80FD\u5BF9\u6BD4" });
+    const table = container.createEl("table", { cls: "csc-feature-table" });
+    const thead = table.createEl("thead");
+    const headerRow = thead.createEl("tr");
+    headerRow.createEl("th", { text: "\u529F\u80FD" });
+    headerRow.createEl("th", { text: "\u57FA\u7840\u7248" });
+    headerRow.createEl("th", { text: "\u6B63\u5F0F\u7248" });
+    const tbody = table.createEl("tbody");
+    const features = [
+      { name: "\u9519\u522B\u5B57\u68C0\u6D4B", basic: "\u2713", full: "\u2713" },
+      { name: "\u6807\u70B9\u7B26\u53F7\u68C0\u67E5", basic: "-", full: "\u2713" },
+      { name: "\u8BED\u6CD5\u9519\u8BEF\u68C0\u6D4B", basic: "-", full: "\u2713" },
+      { name: "\u8868\u8FBE\u4F18\u5316\u5EFA\u8BAE", basic: "-", full: "\u2713" },
+      { name: "\u7F16\u8F91\u5668\u9AD8\u4EAE", basic: "\u2713", full: "\u2713" },
+      { name: "\u4E0A\u4E0B\u6587\u9884\u89C8", basic: "\u2713", full: "\u2713" }
+    ];
+    for (const feature of features) {
+      const row = tbody.createEl("tr");
+      row.createEl("td", { text: feature.name });
+      row.createEl("td", {
+        text: feature.basic,
+        cls: feature.basic === "\u2713" ? "csc-feature-available" : "csc-feature-unavailable"
+      });
+      row.createEl("td", {
+        text: feature.full,
+        cls: feature.full === "\u2713" ? "csc-feature-available" : "csc-feature-unavailable"
+      });
+    }
+  }
+  async handleActivation() {
+    const activationCode = this.plugin.settings.activationCode;
+    if (!activationCode || activationCode.trim().length === 0) {
+      new import_obsidian.Notice("\u8BF7\u8F93\u5165\u6FC0\u6D3B\u7801");
+      return;
+    }
+    if (this.activationButton) {
+      this.activationButton.setAttribute("disabled", "true");
+      this.activationButton.textContent = "\u6FC0\u6D3B\u4E2D...";
+    }
+    try {
+      const result = await activationService.activate(activationCode);
+      if (result.success) {
+        this.plugin.settings.licenseType = result.licenseType || "full";
+        this.plugin.settings.activatedAt = (/* @__PURE__ */ new Date()).toISOString();
+        await this.plugin.saveSettings();
+        new import_obsidian.Notice(result.message);
+        this.display();
+      } else {
+        new import_obsidian.Notice(result.message);
+        if (this.activationButton) {
+          this.activationButton.removeAttribute("disabled");
+          this.activationButton.textContent = "\u6FC0\u6D3B";
+        }
+      }
+    } catch (error) {
+      console.error("Activation error:", error);
+      new import_obsidian.Notice("\u6FC0\u6D3B\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5");
+      if (this.activationButton) {
+        this.activationButton.removeAttribute("disabled");
+        this.activationButton.textContent = "\u6FC0\u6D3B";
+      }
+    }
   }
   renderApiSettings(containerEl) {
     containerEl.createEl("h3", { text: "API \u914D\u7F6E" });
@@ -155,19 +455,66 @@ var CSCSettingTab = class extends import_obsidian.PluginSettingTab {
       return;
     this.testStatus.empty();
     this.testStatus.className = "csc-test-status";
-    const statusEl = this.testStatus.createSpan({
+    this.testStatus.createSpan({
       cls: `csc-test-status-${status}`,
       text: message
     });
   }
   renderEngineSettings(containerEl) {
-    containerEl.createEl("h3", { text: "\u5F15\u64CE\u914D\u7F6E" });
-    new import_obsidian.Setting(containerEl).setName("\u542F\u7528 AI \u5F15\u64CE").setDesc("\u4F7F\u7528 AI \u8FDB\u884C\u8BED\u5883\u76F8\u5173\u7684\u9519\u522B\u5B57\u68C0\u6D4B\uFF08\u9700\u8981 API Key\uFF09").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.aiEngineEnabled).onChange(async (value) => {
-        this.plugin.settings.aiEngineEnabled = value;
+    containerEl.createEl("h3", { text: "\u68C0\u6D4B\u914D\u7F6E" });
+    const isFullVersion = ActivationService.isFullVersion(this.plugin.settings.licenseType);
+    const modeSetting = new import_obsidian.Setting(containerEl).setName("\u68C0\u6D4B\u6A21\u5F0F").setDesc("\u9009\u62E9\u6821\u5BF9\u7684\u68C0\u6D4B\u8303\u56F4\u548C\u6DF1\u5EA6").addDropdown((dropdown) => {
+      this.modeDropdown = dropdown;
+      dropdown.addOption("quick", MODE_LABELS.quick);
+      if (isFullVersion) {
+        dropdown.addOption("standard", MODE_LABELS.standard);
+        dropdown.addOption("deep", MODE_LABELS.deep);
+      }
+      dropdown.setValue(this.plugin.settings.detectionMode).onChange(async (value) => {
+        const selectedMode = value;
+        if (!isFullVersion && selectedMode !== "quick") {
+          new import_obsidian.Notice("\u6807\u51C6\u6A21\u5F0F\u548C\u6DF1\u5EA6\u6A21\u5F0F\u9700\u8981\u6B63\u5F0F\u7248");
+          dropdown.setValue("quick");
+          return;
+        }
+        this.plugin.settings.detectionMode = selectedMode;
         await this.plugin.saveSettings();
-      })
-    );
+        this.updateModeDescription(containerEl, selectedMode);
+      });
+    });
+    if (!isFullVersion) {
+      modeSetting.setDesc("\u6807\u51C6\u6A21\u5F0F\u548C\u6DF1\u5EA6\u6A21\u5F0F\u9700\u8981\u6B63\u5F0F\u7248");
+    }
+    const modeDescEl = containerEl.createDiv({ cls: "csc-mode-desc" });
+    this.renderModeDescription(modeDescEl, this.plugin.settings.detectionMode);
+  }
+  renderModeDescription(container, mode) {
+    container.empty();
+    const desc = MODE_DESCRIPTIONS[mode];
+    container.createEl("div", { cls: "csc-mode-desc-content", text: desc });
+    const features = container.createEl("div", { cls: "csc-mode-features" });
+    switch (mode) {
+      case "quick":
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-typo", text: "\u9519\u522B\u5B57" });
+        break;
+      case "standard":
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-typo", text: "\u9519\u522B\u5B57" });
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-punctuation", text: "\u6807\u70B9" });
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-grammar", text: "\u8BED\u6CD5" });
+        break;
+      case "deep":
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-typo", text: "\u9519\u522B\u5B57" });
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-punctuation", text: "\u6807\u70B9" });
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-grammar", text: "\u8BED\u6CD5" });
+        features.createEl("span", { cls: "csc-mode-tag csc-mode-tag-expression", text: "\u8868\u8FBE\u4F18\u5316" });
+        break;
+    }
+  }
+  updateModeDescription(containerEl, mode) {
+    const existingDesc = containerEl.querySelector(".csc-mode-desc");
+    if (existingDesc) {
+      this.renderModeDescription(existingDesc, mode);
+    }
   }
   renderIgnoredWordsSettings(containerEl) {
     containerEl.createEl("h3", { text: "\u5FFD\u7565\u8BCD\u5E93" });
@@ -205,16 +552,19 @@ var CSCView = class extends import_obsidian2.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.results = [];
+    this.filteredResults = [];
+    this.activeFilter = "all";
     this.status = "idle";
     this.errorMessage = "";
     this.containerDiv = null;
+    this.originalText = "";
     this.plugin = plugin;
   }
   getViewType() {
     return VIEW_TYPE_CSC;
   }
   getDisplayText() {
-    return "\u9519\u522B\u5B57\u68C0\u6D4B";
+    return "\u4E2D\u6587\u6821\u5BF9";
   }
   getIcon() {
     return "spell-check";
@@ -224,14 +574,48 @@ var CSCView = class extends import_obsidian2.ItemView {
   }
   async onClose() {
   }
-  setResults(results) {
+  setResults(results, originalText) {
     this.results = results;
+    if (originalText !== void 0) {
+      this.originalText = originalText;
+    }
+    this.applyFilter();
     this.render();
+  }
+  setOriginalText(text) {
+    this.originalText = text;
   }
   setStatus(status, errorMessage) {
     this.status = status;
     this.errorMessage = errorMessage || "";
     this.render();
+  }
+  applyFilter() {
+    if (this.activeFilter === "all") {
+      this.filteredResults = [...this.results];
+    } else {
+      this.filteredResults = this.results.filter((r) => r.category === this.activeFilter);
+    }
+  }
+  getCategoryCount(category) {
+    if (category === "all")
+      return this.results.length;
+    return this.results.filter((r) => r.category === category).length;
+  }
+  getActiveCategories() {
+    const categories = /* @__PURE__ */ new Set();
+    this.results.forEach((r) => categories.add(r.category));
+    return Array.from(categories);
+  }
+  extractContext(offset, length, contextLength = 20) {
+    if (!this.originalText)
+      return null;
+    const beforeStart = Math.max(0, offset - contextLength);
+    const before = this.originalText.slice(beforeStart, offset);
+    const error = this.originalText.slice(offset, offset + length);
+    const afterEnd = Math.min(this.originalText.length, offset + length + contextLength);
+    const after = this.originalText.slice(offset + length, afterEnd);
+    return { before, error, after };
   }
   render() {
     const container = this.containerEl.children[1];
@@ -239,6 +623,7 @@ var CSCView = class extends import_obsidian2.ItemView {
     container.createEl("div", { cls: "csc-container" }, (div) => {
       this.containerDiv = div;
       this.renderHeader(div);
+      this.renderFilterBar(div);
       this.renderContent(div);
       this.renderFooter(div);
     });
@@ -249,11 +634,19 @@ var CSCView = class extends import_obsidian2.ItemView {
         top.createEl("div", { cls: "csc-title-row" }, (titleRow) => {
           const iconEl = titleRow.createEl("div", { cls: "csc-title-icon" });
           (0, import_obsidian2.setIcon)(iconEl, "spell-check");
-          titleRow.createEl("h3", { text: "\u9519\u522B\u5B57\u68C0\u6D4B", cls: "csc-title" });
+          titleRow.createEl("h3", { text: "\u4E2D\u6587\u6821\u5BF9", cls: "csc-title" });
         });
         const statusEl = top.createEl("div", { cls: "csc-status" });
         this.renderStatus(statusEl);
       });
+      const isFullVersion = this.plugin.isFullVersion();
+      const licenseLabel = LICENSE_LABELS[this.plugin.settings.licenseType];
+      const licenseClass = isFullVersion ? "csc-license-full" : "csc-license-basic";
+      header.createEl("div", { cls: `csc-license-indicator ${licenseClass}` }, (indicator) => {
+        indicator.createEl("span", { text: licenseLabel });
+      });
+      const modeLabel = MODE_LABELS[this.plugin.settings.detectionMode] || "\u5FEB\u901F\u6A21\u5F0F";
+      header.createEl("div", { cls: "csc-mode-indicator", text: modeLabel });
       header.createEl("button", {
         cls: "csc-detect-btn"
       }, (btn) => {
@@ -269,6 +662,36 @@ var CSCView = class extends import_obsidian2.ItemView {
           this.startDetection();
         });
       });
+    });
+  }
+  renderFilterBar(container) {
+    if (this.results.length === 0 || this.status !== "completed")
+      return;
+    container.createEl("div", { cls: "csc-filter-bar" }, (bar) => {
+      bar.createEl("button", {
+        cls: `csc-filter-btn ${this.activeFilter === "all" ? "csc-filter-active" : ""}`,
+        text: `\u5168\u90E8 (${this.getCategoryCount("all")})`
+      }, (btn) => {
+        btn.addEventListener("click", () => {
+          this.activeFilter = "all";
+          this.applyFilter();
+          this.render();
+        });
+      });
+      const activeCategories = this.getActiveCategories();
+      for (const cat of activeCategories) {
+        const count = this.getCategoryCount(cat);
+        bar.createEl("button", {
+          cls: `csc-filter-btn csc-filter-${cat} ${this.activeFilter === cat ? "csc-filter-active" : ""}`,
+          text: `${CATEGORY_LABELS[cat]} (${count})`
+        }, (btn) => {
+          btn.addEventListener("click", () => {
+            this.activeFilter = cat;
+            this.applyFilter();
+            this.render();
+          });
+        });
+      }
     });
   }
   renderStatus(container) {
@@ -325,6 +748,10 @@ var CSCView = class extends import_obsidian2.ItemView {
         this.renderEmpty(content);
         return;
       }
+      if (this.filteredResults.length === 0) {
+        this.renderFilterEmpty(content);
+        return;
+      }
       this.renderResults(content);
     });
   }
@@ -357,7 +784,7 @@ var CSCView = class extends import_obsidian2.ItemView {
       (0, import_obsidian2.setIcon)(iconEl, "check-circle");
       msg.createEl("div", { cls: "csc-message-content" }, (content) => {
         content.createEl("div", { text: "\u592A\u68D2\u4E86\uFF01", cls: "csc-message-title" });
-        content.createEl("div", { text: "\u6CA1\u6709\u53D1\u73B0\u9519\u522B\u5B57", cls: "csc-message-desc" });
+        content.createEl("div", { text: "\u6CA1\u6709\u53D1\u73B0\u95EE\u9898", cls: "csc-message-desc" });
       });
     });
   }
@@ -371,23 +798,46 @@ var CSCView = class extends import_obsidian2.ItemView {
       });
     });
   }
+  renderFilterEmpty(container) {
+    container.createEl("div", { cls: "csc-message csc-message-empty" }, (msg) => {
+      const iconEl = msg.createEl("div", { cls: "csc-message-icon" });
+      (0, import_obsidian2.setIcon)(iconEl, "filter");
+      msg.createEl("div", { cls: "csc-message-content" }, (content) => {
+        content.createEl("div", { text: "\u5F53\u524D\u7B5B\u9009\u65E0\u7ED3\u679C", cls: "csc-message-title" });
+        content.createEl("div", { text: "\u8BE5\u5206\u7C7B\u4E0B\u6CA1\u6709\u68C0\u6D4B\u5230\u95EE\u9898", cls: "csc-message-desc" });
+      });
+    });
+  }
   renderResults(container) {
     container.createEl("div", { cls: "csc-result-list" }, (list) => {
-      this.results.forEach((result, index) => {
+      this.filteredResults.forEach((result, index) => {
         this.renderResultCard(list, result, index);
       });
     });
   }
   renderResultCard(container, result, index) {
+    const globalIndex = this.results.indexOf(result);
     container.createEl("div", { cls: "csc-result-card" }, (card) => {
       card.createEl("div", { cls: "csc-card-header" }, (header) => {
         header.createEl("div", { cls: "csc-card-index" }, (indexEl) => {
-          indexEl.createEl("span", { text: String(index + 1) });
+          indexEl.createEl("span", { text: String(globalIndex + 1) });
         });
-        header.createEl("div", { cls: "csc-card-source" }, (source) => {
-          source.createEl("span", { text: "AI \u68C0\u6D4B" });
+        header.createEl("div", { cls: `csc-card-category csc-category-${result.category}` }, (catEl) => {
+          catEl.createEl("span", { text: CATEGORY_LABELS[result.category] });
         });
       });
+      const context = this.extractContext(result.offset, result.original.length);
+      if (context) {
+        card.createEl("div", { cls: "csc-card-context" }, (ctx) => {
+          if (context.before) {
+            ctx.createEl("span", { text: context.before, cls: "csc-context-before" });
+          }
+          ctx.createEl("span", { text: context.error, cls: "csc-context-error" });
+          if (context.after) {
+            ctx.createEl("span", { text: context.after, cls: "csc-context-after" });
+          }
+        });
+      }
       card.createEl("div", { cls: "csc-card-error" }, (error) => {
         error.createEl("div", { cls: "csc-error-row" }, (row) => {
           row.createEl("span", { text: "\u539F\u6587\uFF1A", cls: "csc-error-label" });
@@ -415,7 +865,7 @@ var CSCView = class extends import_obsidian2.ItemView {
             cls: "csc-action-btn csc-action-apply"
           }, (btn) => {
             btn.addEventListener("click", () => {
-              this.applyFix(result.offset, result.original, suggestion, index);
+              this.applyFix(result.offset, result.original, suggestion, globalIndex);
             });
           });
         });
@@ -425,43 +875,59 @@ var CSCView = class extends import_obsidian2.ItemView {
           (0, import_obsidian2.setIcon)(btn.createEl("div", { cls: "csc-btn-icon-small" }), "x");
           btn.createEl("span", { text: "\u5FFD\u7565" });
           btn.addEventListener("click", () => {
-            this.ignoreWord(result.original, index);
+            this.ignoreWord(result.original, globalIndex);
           });
         });
       });
     });
   }
   renderFooter(container) {
-    if (this.results.length === 0)
+    if (this.filteredResults.length === 0 && this.results.length === 0)
       return;
     container.createEl("div", { cls: "csc-footer" }, (footer) => {
-      footer.createEl("button", {
-        cls: "csc-footer-btn csc-footer-apply"
-      }, (btn) => {
-        (0, import_obsidian2.setIcon)(btn.createEl("div", { cls: "csc-btn-icon" }), "check");
-        btn.createEl("span", { text: "\u5168\u90E8\u66FF\u6362" });
-        btn.addEventListener("click", () => {
-          this.applyAllFixes();
+      if (this.filteredResults.length > 0) {
+        footer.createEl("button", {
+          cls: "csc-footer-btn csc-footer-apply"
+        }, (btn) => {
+          (0, import_obsidian2.setIcon)(btn.createEl("div", { cls: "csc-btn-icon" }), "check");
+          btn.createEl("span", { text: `\u66FF\u6362\u7B5B\u9009\u7ED3\u679C (${this.filteredResults.length})` });
+          btn.addEventListener("click", () => {
+            this.applyFilteredFixes();
+          });
         });
-      });
-      footer.createEl("button", {
-        cls: "csc-footer-btn csc-footer-ignore"
-      }, (btn) => {
-        (0, import_obsidian2.setIcon)(btn.createEl("div", { cls: "csc-btn-icon" }), "x-circle");
-        btn.createEl("span", { text: "\u5168\u90E8\u5FFD\u7565" });
-        btn.addEventListener("click", () => {
-          this.ignoreAllWords();
+        footer.createEl("button", {
+          cls: "csc-footer-btn csc-footer-ignore"
+        }, (btn) => {
+          (0, import_obsidian2.setIcon)(btn.createEl("div", { cls: "csc-btn-icon" }), "x-circle");
+          btn.createEl("span", { text: "\u5168\u90E8\u5FFD\u7565" });
+          btn.addEventListener("click", () => {
+            this.ignoreAllWords();
+          });
         });
-      });
+      }
+      if (this.results.length > 0) {
+        footer.createEl("button", {
+          cls: "csc-footer-btn csc-footer-clear"
+        }, (btn) => {
+          (0, import_obsidian2.setIcon)(btn.createEl("div", { cls: "csc-btn-icon" }), "eraser");
+          btn.createEl("span", { text: "\u6E05\u9664\u9AD8\u4EAE" });
+          btn.addEventListener("click", () => {
+            this.clearHighlights();
+          });
+        });
+      }
     });
   }
   startDetection() {
+    this.activeFilter = "all";
     this.plugin.startDetection();
   }
   applyFix(offset, original, replacement, index) {
     const success = this.plugin.applyFix(offset, original, replacement);
     if (success) {
       this.results = this.plugin.getResults();
+      this.originalText = this.plugin.getOriginalText() || this.originalText;
+      this.applyFilter();
       this.render();
     }
   }
@@ -471,12 +937,37 @@ var CSCView = class extends import_obsidian2.ItemView {
       this.plugin.saveSettings();
     }
     this.results.splice(index, 1);
+    this.applyFilter();
     this.render();
   }
-  applyAllFixes() {
-    this.plugin.applyAllFixes();
+  applyFilteredFixes() {
+    const editor = this.plugin.getEditor();
+    if (!editor)
+      return;
+    const sortedResults = [...this.filteredResults].sort((a, b) => b.offset - a.offset);
+    let successCount = 0;
+    for (const result of sortedResults) {
+      if (result.suggestions.length === 0)
+        continue;
+      const replacement = result.suggestions[0];
+      const from = editor.offsetToPos(result.offset);
+      const to = editor.offsetToPos(result.offset + result.original.length);
+      try {
+        const currentText = editor.getRange(from, to);
+        if (currentText === result.original) {
+          editor.replaceRange(replacement, from, to);
+          successCount++;
+        }
+      } catch (error) {
+        console.error("Apply fix error:", error);
+      }
+    }
     this.results = [];
+    this.filteredResults = [];
+    this.activeFilter = "all";
+    this.originalText = "";
     this.render();
+    new import_obsidian2.Notice(`\u5DF2\u4FEE\u590D ${successCount} \u5904\u95EE\u9898`);
   }
   ignoreAllWords() {
     this.results.forEach((result) => {
@@ -486,19 +977,17 @@ var CSCView = class extends import_obsidian2.ItemView {
     });
     this.plugin.saveSettings();
     this.results = [];
+    this.filteredResults = [];
+    this.activeFilter = "all";
     this.render();
   }
-};
-
-// src/types.ts
-var DEFAULT_SETTINGS = {
-  apiKey: "",
-  apiEndpoint: "https://api.deepseek.com/v1/chat/completions",
-  modelName: "deepseek-chat",
-  aiEngineEnabled: true,
-  ignoredWords: [],
-  maxSegmentLength: 1500,
-  timeout: 3e4
+  clearHighlights() {
+    this.plugin.clearAllHighlights();
+    this.results = [];
+    this.filteredResults = [];
+    this.activeFilter = "all";
+    this.render();
+  }
 };
 
 // src/detector/scheduler.ts
@@ -897,6 +1386,11 @@ var TextSegmenter = class {
 };
 
 // src/engines/aiDetector.ts
+var CATEGORY_MAP = {
+  typo: "typo",
+  punctuation: "punctuation",
+  grammar: "grammar"
+};
 var AIDetector = class {
   constructor(settings) {
     this.settings = settings;
@@ -905,20 +1399,22 @@ var AIDetector = class {
     if (!this.settings.apiKey) {
       throw new Error("API Key \u672A\u914D\u7F6E");
     }
-    const prompt = this.buildPrompt(segment.text);
+    const prompt = this.buildPrompt(segment.text, this.settings.detectionMode);
     try {
       const response = await this.callAPI(prompt);
       const parsed = this.parseResponse(response);
       const results = [];
       for (const r of parsed.results) {
         const matchResults = this.findWordInText(r.original, segment.text, segment.startOffset);
+        const category = this.normalizeCategory(r.category);
         for (const match of matchResults) {
           results.push({
             offset: match.offset,
             original: r.original,
             suggestions: [r.correct],
             reason: r.reason,
-            source: "ai"
+            source: "ai",
+            category
           });
         }
       }
@@ -943,6 +1439,62 @@ var AIDetector = class {
     }
     return allResults;
   }
+  normalizeCategory(raw) {
+    if (!raw)
+      return "typo";
+    const lower = raw.toLowerCase().trim();
+    if (CATEGORY_MAP[lower])
+      return CATEGORY_MAP[lower];
+    if (lower.includes("\u6807\u70B9") || lower.includes("punct"))
+      return "punctuation";
+    if (lower.includes("\u8BED\u6CD5") || lower.includes("gram"))
+      return "grammar";
+    return "typo";
+  }
+  buildPrompt(text, mode) {
+    const baseInstruction = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u4E2D\u6587\u6821\u5BF9\u52A9\u624B\u3002`;
+    let taskInstruction = "";
+    let categoryInstruction = "";
+    switch (mode) {
+      case "quick":
+        taskInstruction = `\u8BF7\u8BC6\u522B\u4EE5\u4E0B\u6587\u672C\u4E2D\u7684\u9519\u522B\u5B57\uFF08\u97F3\u8FD1\u5B57\u3001\u5F62\u8FD1\u5B57\u3001\u7B14\u8BEF\uFF09\u3002`;
+        categoryInstruction = `category \u56FA\u5B9A\u586B "typo"\u3002`;
+        break;
+      case "standard":
+        taskInstruction = `\u8BF7\u8BC6\u522B\u4EE5\u4E0B\u6587\u672C\u4E2D\u7684\u4EE5\u4E0B\u95EE\u9898\uFF1A
+1. \u9519\u522B\u5B57\uFF1A\u97F3\u8FD1\u5B57\u3001\u5F62\u8FD1\u5B57\u3001\u7B14\u8BEF
+2. \u6807\u70B9\u7B26\u53F7\u9519\u8BEF\uFF1A\u4E2D\u82F1\u6587\u6807\u70B9\u6DF7\u7528\uFF08\u5982\u4E2D\u6587\u8BED\u5883\u7528\u82F1\u6587\u9017\u53F7\uFF09\u3001\u8FDE\u7EED\u91CD\u590D\u6807\u70B9\uFF08\u5982"\u3002\u3002"\uFF09\u3001\u7F3A\u5931\u6807\u70B9\u3001\u6807\u70B9\u4F4D\u7F6E\u9519\u8BEF
+3. \u8BED\u6CD5\u9519\u8BEF\uFF1A\u642D\u914D\u4E0D\u5F53\u3001\u6210\u5206\u6B8B\u7F3A\u3001\u8BED\u5E8F\u4E0D\u5F53\u3001\u91CD\u590D\u8D58\u4F59`;
+        categoryInstruction = `category \u6839\u636E\u95EE\u9898\u7C7B\u578B\u586B\u5199\uFF1A"typo"\uFF08\u9519\u522B\u5B57\uFF09\u3001"punctuation"\uFF08\u6807\u70B9\u7B26\u53F7\uFF09\u3001"grammar"\uFF08\u8BED\u6CD5\u9519\u8BEF\uFF09\u3002`;
+        break;
+      case "deep":
+        taskInstruction = `\u8BF7\u8BC6\u522B\u4EE5\u4E0B\u6587\u672C\u4E2D\u7684\u4EE5\u4E0B\u95EE\u9898\uFF1A
+1. \u9519\u522B\u5B57\uFF1A\u97F3\u8FD1\u5B57\u3001\u5F62\u8FD1\u5B57\u3001\u7B14\u8BEF
+2. \u6807\u70B9\u7B26\u53F7\u9519\u8BEF\uFF1A\u4E2D\u82F1\u6587\u6807\u70B9\u6DF7\u7528\u3001\u8FDE\u7EED\u91CD\u590D\u6807\u70B9\u3001\u7F3A\u5931\u6807\u70B9\u3001\u6807\u70B9\u4F4D\u7F6E\u9519\u8BEF
+3. \u8BED\u6CD5\u9519\u8BEF\uFF1A\u642D\u914D\u4E0D\u5F53\u3001\u6210\u5206\u6B8B\u7F3A\u3001\u8BED\u5E8F\u4E0D\u5F53\u3001\u91CD\u590D\u8D58\u4F59
+4. \u8868\u8FBE\u4F18\u5316\uFF1A\u53E3\u8BED\u5316\u8868\u8FBE\u5EFA\u8BAE\u66FF\u6362\u4E3A\u4E66\u9762\u8BED\u3001\u76F8\u90BB\u53E5\u5B50\u91CD\u590D\u7528\u8BCD\u5EFA\u8BAE\u66FF\u6362`;
+        categoryInstruction = `category \u6839\u636E\u95EE\u9898\u7C7B\u578B\u586B\u5199\uFF1A"typo"\uFF08\u9519\u522B\u5B57\uFF09\u3001"punctuation"\uFF08\u6807\u70B9\u7B26\u53F7\uFF09\u3001"grammar"\uFF08\u8BED\u6CD5\u9519\u8BEF\uFF09\u3002\u8868\u8FBE\u4F18\u5316\u7C7B\u4E5F\u5F52\u5165 "grammar"\u3002`;
+        break;
+    }
+    return `${baseInstruction}
+${taskInstruction}
+
+\u6587\u672C\uFF1A
+${text}
+
+\u8BF7\u4E25\u683C\u6309\u7167\u4EE5\u4E0B JSON \u6570\u7EC4\u683C\u5F0F\u8FD4\u56DE\u7ED3\u679C\uFF0C\u4E0D\u8981\u8FD4\u56DE\u4EFB\u4F55\u5176\u4ED6\u6587\u5B57\uFF1A
+[{"original": "\u516C\u4F5C", "correct": "\u5DE5\u4F5C", "reason": "\u540C\u97F3\u5B57\u8BEF\u7528", "category": "typo"}]
+
+\u6CE8\u610F\uFF1A
+1. original \u662F\u539F\u6587\u4E2D\u7684\u9519\u8BEF\u7247\u6BB5\uFF08\u5FC5\u987B\u5B8C\u5168\u5339\u914D\u539F\u6587\uFF09
+2. correct \u662F\u5EFA\u8BAE\u7684\u6B63\u786E\u5185\u5BB9
+3. reason \u662F\u7B80\u8981\u7684\u7EA0\u9519\u539F\u56E0
+4. ${categoryInstruction}
+5. \u5982\u679C\u6CA1\u6709\u53D1\u73B0\u95EE\u9898\uFF0C\u8FD4\u56DE\u7A7A\u6570\u7EC4 []
+6. \u4FDD\u6301\u539F\u610F\uFF0C\u4E0D\u8981\u6539\u52A8\u6587\u5B66\u6027\u4FEE\u8F9E\u3001\u4E13\u6709\u540D\u8BCD\u3001\u4EBA\u540D\u5730\u540D
+7. \u53EA\u8FD4\u56DE\u786E\u5B9A\u6709\u95EE\u9898\u7684\uFF0C\u4E0D\u786E\u5B9A\u7684\u4E0D\u8FD4\u56DE
+8. \u53EA\u8FD4\u56DE JSON \u6570\u7EC4\uFF0C\u4E0D\u8981\u6709\u4EFB\u4F55\u5176\u4ED6\u8F93\u51FA`;
+  }
   findWordInText(word, text, baseOffset) {
     const results = [];
     if (!word || word.length === 0) {
@@ -960,24 +1512,6 @@ var AIDetector = class {
     }
     return results;
   }
-  buildPrompt(text) {
-    return `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u4E2D\u6587\u6821\u5BF9\u52A9\u624B\u3002\u8BF7\u8BC6\u522B\u4EE5\u4E0B\u6587\u672C\u4E2D\u7684\u9519\u522B\u5B57\u3001\u97F3\u8FD1\u5B57\u3001\u5F62\u8FD1\u5B57\u8BEF\u7528\u3002
-
-\u6587\u672C\uFF1A
-${text}
-
-\u8BF7\u4E25\u683C\u6309\u7167\u4EE5\u4E0B JSON \u6570\u7EC4\u683C\u5F0F\u8FD4\u56DE\u7ED3\u679C\uFF0C\u4E0D\u8981\u8FD4\u56DE\u4EFB\u4F55\u5176\u4ED6\u6587\u5B57\uFF1A
-[{"original": "\u516C\u4F5C", "correct": "\u5DE5\u4F5C", "reason": "\u540C\u97F3\u5B57\u8BEF\u7528"}]
-
-\u6CE8\u610F\uFF1A
-1. original \u662F\u539F\u6587\u4E2D\u7684\u9519\u8BEF\u8BCD\uFF08\u5FC5\u987B\u5B8C\u5168\u5339\u914D\u539F\u6587\uFF09
-2. correct \u662F\u5EFA\u8BAE\u7684\u6B63\u786E\u8BCD
-3. reason \u662F\u7B80\u8981\u7684\u7EA0\u9519\u539F\u56E0\uFF08\u53EF\u9009\uFF09
-4. \u5982\u679C\u6CA1\u6709\u53D1\u73B0\u9519\u8BEF\uFF0C\u8FD4\u56DE\u7A7A\u6570\u7EC4 []
-5. \u4FDD\u6301\u539F\u610F\uFF0C\u4E0D\u8981\u6539\u52A8\u6587\u5B66\u6027\u4FEE\u8F9E\u3001\u4E13\u6709\u540D\u8BCD\u3001\u4EBA\u540D\u5730\u540D
-6. \u53EA\u8FD4\u56DE\u786E\u5B9A\u662F\u9519\u522B\u5B57\u7684\uFF0C\u4E0D\u786E\u5B9A\u7684\u4E0D\u8FD4\u56DE
-7. \u53EA\u8FD4\u56DE JSON \u6570\u7EC4\uFF0C\u4E0D\u8981\u6709\u4EFB\u4F55\u5176\u4ED6\u8F93\u51FA`;
-  }
   async callAPI(prompt) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.settings.timeout);
@@ -993,7 +1527,7 @@ ${text}
           messages: [
             {
               role: "system",
-              content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u4E2D\u6587\u6821\u5BF9\u52A9\u624B\uFF0C\u4E13\u95E8\u8BC6\u522B\u6587\u672C\u4E2D\u7684\u9519\u522B\u5B57\u3002\u4F60\u53EA\u8FD4\u56DE JSON \u683C\u5F0F\u7684\u7ED3\u679C\uFF0C\u4E0D\u8FD4\u56DE\u4EFB\u4F55\u5176\u4ED6\u5185\u5BB9\u3002"
+              content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u4E2D\u6587\u6821\u5BF9\u52A9\u624B\uFF0C\u4E13\u95E8\u8BC6\u522B\u6587\u672C\u4E2D\u7684\u9519\u522B\u5B57\u3001\u6807\u70B9\u9519\u8BEF\u548C\u8BED\u6CD5\u95EE\u9898\u3002\u4F60\u53EA\u8FD4\u56DE JSON \u683C\u5F0F\u7684\u7ED3\u679C\uFF0C\u4E0D\u8FD4\u56DE\u4EFB\u4F55\u5176\u4ED6\u5185\u5BB9\u3002"
             },
             {
               role: "user",
@@ -1075,7 +1609,7 @@ var DetectionScheduler = class {
     const cleanedText = cleanResult.text;
     const mapper = new OffsetMapper(cleanResult.mappings);
     const allResults = [];
-    if (this.settings.aiEngineEnabled && this.settings.apiKey) {
+    if (this.settings.apiKey) {
       this.reportProgress({ status: "detecting", currentStep: "\u51C6\u5907 AI \u68C0\u6D4B..." });
       const segments = this.textSegmenter.segment(cleanedText);
       if (segments.length > 0) {
@@ -1127,6 +1661,82 @@ var DetectionScheduler = class {
   }
 };
 
+// src/editor/highlight.ts
+var import_view = require("@codemirror/view");
+var import_state = require("@codemirror/state");
+var setHighlightsEffect = import_state.StateEffect.define();
+var clearHighlightsEffect = import_state.StateEffect.define();
+function getCategoryClass(category) {
+  switch (category) {
+    case "typo":
+      return "csc-highlight-typo";
+    case "punctuation":
+      return "csc-highlight-punctuation";
+    case "grammar":
+      return "csc-highlight-grammar";
+    default:
+      return "csc-highlight-typo";
+  }
+}
+function buildDecorationsFromResults(results, docLength) {
+  const builder = new import_state.RangeSetBuilder();
+  if (results.length === 0) {
+    return builder.finish();
+  }
+  const sortedResults = [...results].sort((a, b) => a.offset - b.offset);
+  for (const result of sortedResults) {
+    const from = result.offset;
+    const to = result.offset + result.original.length;
+    if (from >= 0 && to <= docLength && from < to) {
+      const decoration = import_view.Decoration.mark({
+        class: getCategoryClass(result.category)
+      });
+      builder.add(from, to, decoration);
+    }
+  }
+  return builder.finish();
+}
+var highlightsField = import_state.StateField.define({
+  create: () => import_view.Decoration.none,
+  update: (decorations, tr) => {
+    decorations = decorations.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(setHighlightsEffect)) {
+        return buildDecorationsFromResults(effect.value, tr.newDoc.length);
+      }
+      if (effect.is(clearHighlightsEffect)) {
+        return import_view.Decoration.none;
+      }
+    }
+    return decorations;
+  },
+  provide: (f) => import_view.EditorView.decorations.from(f)
+});
+var highlightTheme = import_view.EditorView.baseTheme({
+  ".csc-highlight-typo": {
+    backgroundColor: "rgba(230, 57, 70, 0.15)",
+    borderBottom: "2px wavy rgba(230, 57, 70, 0.7)"
+  },
+  ".csc-highlight-punctuation": {
+    backgroundColor: "rgba(230, 167, 0, 0.15)",
+    borderBottom: "2px wavy rgba(230, 167, 0, 0.7)"
+  },
+  ".csc-highlight-grammar": {
+    backgroundColor: "rgba(86, 156, 214, 0.15)",
+    borderBottom: "2px wavy rgba(86, 156, 214, 0.7)"
+  }
+});
+function setHighlights(view, results) {
+  view.dispatch({
+    effects: setHighlightsEffect.of(results)
+  });
+}
+function clearHighlights(view) {
+  view.dispatch({
+    effects: clearHighlightsEffect.of(void 0)
+  });
+}
+
 // src/main.ts
 var CSCPlugin = class extends import_obsidian5.Plugin {
   constructor() {
@@ -1134,22 +1744,32 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
     this.view = null;
     this.scheduler = null;
     this.detectionResults = [];
+    this.originalText = "";
   }
   async onload() {
     await this.loadSettings();
+    await this.syncLicenseStatus();
     this.scheduler = new DetectionScheduler(this.settings, this.app);
+    this.registerEditorExtension([highlightsField, highlightTheme]);
     this.registerView(VIEW_TYPE_CSC, (leaf) => {
       this.view = new CSCView(leaf, this);
       return this.view;
     });
-    this.addRibbonIcon("spell-check", "\u4E2D\u6587\u9519\u522B\u5B57\u68C0\u6D4B", () => {
+    this.addRibbonIcon("spell-check", "\u4E2D\u6587\u6821\u5BF9", () => {
       this.activateView();
     });
     this.addCommand({
       id: "check-chinese-typos",
-      name: "\u68C0\u6D4B\u5F53\u524D\u6587\u6863\u9519\u522B\u5B57",
+      name: "\u68C0\u6D4B\u5F53\u524D\u6587\u6863",
       callback: () => {
         this.startDetection();
+      }
+    });
+    this.addCommand({
+      id: "clear-highlights",
+      name: "\u6E05\u9664\u7F16\u8F91\u5668\u9AD8\u4EAE",
+      callback: () => {
+        this.clearAllHighlights();
       }
     });
     this.addSettingTab(new CSCSettingTab(this.app, this));
@@ -1159,6 +1779,7 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
       this.view = null;
     }
     this.scheduler = null;
+    this.clearEditorHighlights();
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -1168,6 +1789,28 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
     if (this.scheduler) {
       this.scheduler.updateSettings(this.settings);
     }
+  }
+  async syncLicenseStatus() {
+    const localLicenseType = activationService.checkLocalLicenseStatus();
+    if (localLicenseType !== this.settings.licenseType) {
+      this.settings.licenseType = localLicenseType;
+      await this.saveSettings();
+    }
+    if (!ActivationService.isFullVersion(localLicenseType)) {
+      if (this.settings.detectionMode !== "quick") {
+        this.settings.detectionMode = "quick";
+        await this.saveSettings();
+      }
+    }
+  }
+  isFullVersion() {
+    return ActivationService.isFullVersion(this.settings.licenseType);
+  }
+  canUseMode(mode) {
+    if (mode === "quick") {
+      return true;
+    }
+    return this.isFullVersion();
   }
   activateView() {
     var _a;
@@ -1201,6 +1844,14 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
     }
     return null;
   }
+  getEditorView() {
+    var _a;
+    const mdView = this.getMarkdownView();
+    if (!mdView)
+      return null;
+    const cm = (_a = mdView.editor) == null ? void 0 : _a.cm;
+    return cm || null;
+  }
   async startDetection() {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
@@ -1212,6 +1863,13 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
       new import_obsidian5.Notice("\u5F53\u524D\u89C6\u56FE\u4E0D\u662F Markdown \u7F16\u8F91\u5668");
       return;
     }
+    if (!this.canUseMode(this.settings.detectionMode)) {
+      new import_obsidian5.Notice("\u6807\u51C6\u6A21\u5F0F\u548C\u6DF1\u5EA6\u6A21\u5F0F\u9700\u8981\u6B63\u5F0F\u7248");
+      return;
+    }
+    const editor = mdView.editor;
+    this.originalText = editor.getValue();
+    this.clearEditorHighlights();
     this.activateView();
     if (!this.scheduler) {
       this.scheduler = new DetectionScheduler(this.settings, this.app);
@@ -1222,13 +1880,19 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
     try {
       this.detectionResults = await this.scheduler.detect();
       if (this.view) {
-        this.view.setResults(this.detectionResults);
+        this.view.setResults(this.detectionResults, this.originalText);
         this.view.setStatus("completed");
       }
+      if (this.detectionResults.length > 0) {
+        const editorView = this.getEditorView();
+        if (editorView) {
+          setHighlights(editorView, this.detectionResults);
+        }
+      }
       if (this.detectionResults.length === 0) {
-        new import_obsidian5.Notice("\u592A\u68D2\u4E86\uFF01\u6CA1\u6709\u53D1\u73B0\u9519\u522B\u5B57");
+        new import_obsidian5.Notice("\u592A\u68D2\u4E86\uFF01\u6CA1\u6709\u53D1\u73B0\u95EE\u9898");
       } else {
-        new import_obsidian5.Notice(`\u53D1\u73B0 ${this.detectionResults.length} \u5904\u53EF\u80FD\u7684\u9519\u522B\u5B57`);
+        new import_obsidian5.Notice(`\u53D1\u73B0 ${this.detectionResults.length} \u5904\u95EE\u9898`);
       }
     } catch (error) {
       console.error("Detection error:", error);
@@ -1287,10 +1951,12 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
       }
     }
     this.detectionResults = [];
+    this.originalText = "";
+    this.clearEditorHighlights();
     if (this.view) {
       this.view.setResults([]);
     }
-    new import_obsidian5.Notice(`\u5DF2\u4FEE\u590D ${successCount} \u5904\u9519\u522B\u5B57`);
+    new import_obsidian5.Notice(`\u5DF2\u4FEE\u590D ${successCount} \u5904\u95EE\u9898`);
     return successCount;
   }
   updateResultsAfterFix(fixedOffset, originalLength, replacementLength) {
@@ -1303,9 +1969,31 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
         result.offset += lengthDiff;
       }
     }
+    if (this.detectionResults.length > 0) {
+      const editorView = this.getEditorView();
+      if (editorView) {
+        setHighlights(editorView, this.detectionResults);
+      }
+    } else {
+      this.clearEditorHighlights();
+    }
     if (this.view) {
       this.view.setResults(this.detectionResults);
     }
+  }
+  clearEditorHighlights() {
+    const editorView = this.getEditorView();
+    if (editorView) {
+      clearHighlights(editorView);
+    }
+  }
+  clearAllHighlights() {
+    this.clearEditorHighlights();
+    this.detectionResults = [];
+    if (this.view) {
+      this.view.setResults([]);
+    }
+    new import_obsidian5.Notice("\u5DF2\u6E05\u9664\u7F16\u8F91\u5668\u9AD8\u4EAE");
   }
   getEditor() {
     const mdView = this.getMarkdownView();
@@ -1313,5 +2001,8 @@ var CSCPlugin = class extends import_obsidian5.Plugin {
   }
   getResults() {
     return this.detectionResults;
+  }
+  getOriginalText() {
+    return this.originalText;
   }
 };
