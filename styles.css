@@ -731,3 +731,25 @@
 .csc-feature-unavailable {
   color: var(--text-muted);
 }
+
+.csc-purchase-link {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.csc-purchase-link a {
+  display: inline-block;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff !important;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.csc-purchase-link a:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}

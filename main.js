@@ -267,6 +267,12 @@ var CSCSettingTab = class extends import_obsidian.PluginSettingTab {
       });
       const featureComparison = containerEl.createDiv({ cls: "csc-feature-comparison" });
       this.renderFeatureComparison(featureComparison);
+      const purchaseLink = containerEl.createDiv({ cls: "csc-purchase-link" });
+      purchaseLink.createEl("a", {
+        text: "\u83B7\u53D6\u6B63\u5F0F\u7248\u6FC0\u6D3B\u7801 \u2192",
+        href: "http://www.moaono.com/obsidian-storyweaver/proofreader.html",
+        attr: { target: "_blank" }
+      });
     }
   }
   renderLicenseStatus(container, licenseType) {
